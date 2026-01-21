@@ -57,8 +57,8 @@ def analyze_report(file):
     total_groups = df_students_valid_routes["Ruta"].nunique()
 
     # Preparar columnas
-    df_students["progress_percent"] = df_students["% Progreso en ruta"].apply(parse_percentage)
     df_students["courses_percent"] = df_students["Cursos completos"].apply(parse_fraction)
+    df_students["classes_percent"] = df_students["Clases completas"].apply(parse_fraction)
 
     df_students["last_login_days"] = df_students["Último inicio de sesión (UTC-3)"].apply(days_since)
     df_students["last_progress_days"] = df_students["Último progreso (UTC-3)"].apply(days_since)
@@ -79,7 +79,7 @@ def analyze_report(file):
             "route_type": "students",
             "students_count": len(gdf),
             "metrics": {
-                "avg_progress_percent": safe_round(gdf["progress_percent"].mean()),
+                "classes_completion_percent": safe_round(gdf["classes_percent"].mean()),
                 "digital_vitality_30d_percent": safe_round(gdf["active_30d"].mean() * 100),
                 "courses_completion_percent": safe_round(gdf["courses_percent"].mean()),
                 "recent_progress_15d_percent": safe_round(gdf["progress_15d"].mean() * 100),
