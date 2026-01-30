@@ -1,5 +1,17 @@
 from datetime import datetime
 import math
+import os
+
+
+def school_id_from_filename(filename):
+    """
+    Extrae el nombre del colegio desde el nombre del archivo.
+    Quita la extensión y espacios al inicio/final. Los espacios en el nombre se conservan.
+    """
+    if not filename or not isinstance(filename, str):
+        return ""
+    base = os.path.splitext(filename.strip())[0]
+    return base.strip()
 
 
 def parse_percentage(value):

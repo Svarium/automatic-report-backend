@@ -4,11 +4,38 @@ from app.utils import (
     parse_percentage,
     parse_fraction,
     days_since,
-    safe_round
+    safe_round,
+    school_id_from_filename,
 )
 
 VITALITY_DAYS = 30
 RECENT_PROGRESS_DAYS = 15
+
+
+# Mapeo reporte nuevo → nombres canónicos (mismos que reporte original)
+NEW_REPORT_COLUMN_MAP = {
+    "Usuario": "Estudiante",
+    "Certificación": "Ruta",
+    "Progreso en cursos": "Cursos completos",
+    "Último login": "Último inicio de sesión (UTC-3)",
+    "Último progreso": "Último progreso (UTC-3)",
+}
+
+
+def _normalize_columns_and_school(df, filename):
+    """Detecta formato (original vs nuevo), normaliza columnas y devuelve school_id."""
+    df.columns = [str(c).strip() for c in df.columns]
+
+    is_new_format = "Certificación" in df.columns and "Usuario" in df.columns
+
+    if is_new_format:
+        rename = {k: v for k, v in NEW_REPORT_COLUMN_MAP.items() if k in df.columns}
+        df = df.rename(columns=rename)
+        school_id = school_id_from_filename(filename)
+    else:
+        school_id = df["Escuela"].iloc[0] if "Escuela" in df.columns else school_id_from_filename(filename)
+
+    return df, school_id
 
 
 def analyze_report(file):
@@ -21,21 +48,19 @@ def analyze_report(file):
         df = pd.read_excel(file.file)
 
     # --------------------------------------------------
-    # Normalizar nombres de columnas
+    # Normalizar columnas y obtener school_id (soporta reporte original y nuevo)
     # --------------------------------------------------
+    df, school_id = _normalize_columns_and_school(df, file.filename or "")
+
+    # --------------------------------------------------
+    # Filtrar filas inválidas (ruta vacía, "Filtros aplicados")
+    # --------------------------------------------------
+    if "Ruta" not in df.columns:
+        raise ValueError("El archivo no contiene la columna de ruta/certificación esperada.")
+    df["Ruta"] = df["Ruta"].fillna("").astype(str)
     df = df[df["Ruta"].notna()]
     df = df[df["Ruta"].str.strip() != ""]
-    # Eliminar filas de "Filtros aplicados"
     df = df[~df["Ruta"].str.contains("Filtros aplicados", case=False, na=False)]
-    df.columns = [c.strip() for c in df.columns]
-
-    # Normalizar Ruta (evita errores con NaN)
-    df["Ruta"] = df["Ruta"].fillna("").astype(str)
-
-    # --------------------------------------------------
-    # Identificar colegio
-    # --------------------------------------------------
-    school_id = df["Escuela"].iloc[0]
 
     # --------------------------------------------------
     # 🔥 FIX PLD — detección correcta (CONTIENTE, no prefijo)
@@ -87,33 +112,39 @@ def analyze_report(file):
         })
 
     # ==================================================
-    # DOCENTES (PLD)
+    # DOCENTES (PLD) — un docente puede tener varias certificaciones (varias filas)
     # ==================================================
     teachers = []
 
     if not df_teachers.empty:
-        # progreso desde "X de Y"
         df_teachers["progress_percent"] = df_teachers["Clases completas"].apply(parse_fraction)
         df_teachers["certified"] = df_teachers["progress_percent"] == 100
 
-        for _, row in df_teachers.iterrows():
+        for name, group in df_teachers.groupby("Estudiante"):
+            plds = []
+            for _, row in group.iterrows():
+                plds.append({
+                    "certification_name": row["Ruta"],
+                    "progress_percent": safe_round(row["progress_percent"]),
+                    "certified": bool(row["certified"]),
+                })
             teachers.append({
-                "name": row["Estudiante"],                
-                "progress_percent": safe_round(row["progress_percent"]),
-                "certified": bool(row["certified"])
+                "name": name,
+                "plds": plds,
             })
 
+        total_teachers = len(teachers)
+        certified_teachers = sum(1 for t in teachers if any(p["certified"] for p in t["plds"]))
         teachers_summary = {
-            "total_teachers": len(df_teachers),
-            "certified_teachers": int(df_teachers["certified"].sum()),
-            "certification_rate_percent": safe_round(df_teachers["certified"].mean() * 100),
+            "total_teachers": total_teachers,
+            "certified_teachers": certified_teachers,
+            "certification_rate_percent": safe_round(certified_teachers / total_teachers * 100) if total_teachers else 0.0,
         }
-
     else:
         teachers_summary = {
             "total_teachers": 0,
             "certified_teachers": 0,
-            "certification_rate_percent": 0,
+            "certification_rate_percent": 0.0,
         }
 
     # ==================================================

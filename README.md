@@ -55,42 +55,53 @@ backend/
 2. **Lectura**: FastAPI recibe el archivo y lo pasa a `analyzer.py`
 3. **Procesamiento inicial** (`analyzer.py`):
    - Lee el archivo con pandas
-   - Normaliza nombres de columnas (elimina espacios)
+   - Detecta formato (original vs nuevo) y normaliza nombres de columnas al esquema canónico
+   - Identifica el colegio: columna `Escuela` (formato original) o **nombre del archivo sin extensión** (formato nuevo)
    - Filtra filas inválidas (rutas vacías, "Filtros aplicados", etc.)
-   - Identifica el colegio desde la columna `Escuela`
 4. **Separación alumnos/docentes**:
    - Detecta rutas que contienen "PLD" (case-insensitive)
    - Crea dos datasets completamente separados: `df_students` y `df_teachers`
 5. **Cálculo de métricas**:
    - **Alumnos**: Se agrupan por ruta y se calculan métricas por grupo
-   - **Docentes**: Se procesan individualmente y se determina certificación
+   - **Docentes**: Se agrupan por nombre (persona); cada docente puede tener varias certificaciones (PLD), cada una con su progreso y estado de certificación
 6. **Respuesta**: Se devuelve un JSON estructurado con toda la información organizada
 
 ---
 
 ## 📥 Entrada esperada (archivo)
 
-El archivo debe contener las siguientes columnas:
+El backend acepta **dos formatos de reporte**. Se detecta automáticamente por la presencia de las columnas `Certificación` y `Usuario` (formato nuevo) o las columnas originales.
 
-### Columnas principales:
-- `Escuela`: Identificador del colegio
+### Formato original (reporte antiguo)
+
+- `Escuela`: Identificador del colegio (se usa para `school.id`)
 - `Estudiante`: Nombre del estudiante o docente
 - `Ruta`: Nombre de la ruta educativa (si contiene "PLD" → es docente)
-
-### Columnas para alumnos:
 - `Cursos completos`: Formato fracción `"X/Y"` (ej: `"30/47"` o `"47.0/47"`)
-- `Clases completas`: Formato fracción `"X/Y"` (ej: `"15/20"` o `"20.0/20"`)
+- `Clases completas`: Formato fracción `"X/Y"`
 - `Último inicio de sesión (UTC-3)`: Fecha del último login
 - `Último progreso (UTC-3)`: Fecha del último progreso registrado
 
-### Columnas para docentes (PLD):
-- `Clases completas`: Formato fracción `"X/Y"` (ej: `"47/47"`)
+### Formato nuevo (reporte con certificaciones por fila)
+
+| Columna en el archivo | Equivale a (lógica interna) |
+|----------------------|-----------------------------|
+| **Usuario** (A) | Estudiante (nombre) |
+| **Certificación** (C) | Ruta (si contiene "PLD" → docente) |
+| **Progreso en cursos** (D) | Cursos completos (fracción, ej: `44/47`) |
+| **Clases completas** (E) | Clases completas (fracción, ej: `44/47`) |
+| **Último progreso** (F) | Último progreso (UTC-3) |
+| **Último login** (G) | Último inicio de sesión (UTC-3) |
+
+- **Nombre del colegio (`school.id`)**: En el formato nuevo no hay columna "Escuela". El nombre del colegio se toma del **nombre del archivo** subido (sin extensión, espacios al inicio/final eliminados). Se recomienda que los mentores guarden el reporte con el nombre correcto del colegio.
+- Columnas ignoradas en el formato nuevo: Email (B), Fecha de inscripción (H), track_id (I), user_id (J).
 
 ### Tolerancia del sistema:
 - ✅ Celdas vacías
 - ✅ Valores NaN
 - ✅ Formatos inconsistentes (dentro de lo razonable)
 - ✅ Rutas vacías (se filtran automáticamente)
+- ✅ Fracciones con enteros (`44/47`) o decimales (`44.0/47`)
 
 ---
 
@@ -160,42 +171,30 @@ Cada grupo de estudiantes tiene las siguientes métricas:
 
 #### Reglas de procesamiento
 
-- **Cada fila PLD = 1 docente** (no se agrupan por ruta)
-- Se ignora completamente el nombre de la ruta (no aporta valor analítico)
-- El progreso se calcula desde la columna `Clases completas` usando `parse_fraction()`
-  - Formato esperado: `"X/Y"` (ej: `"47/47"` o `"35/47"`)
-  - Se convierte a porcentaje: `(X/Y) * 100`
-
-#### Certificación docente
-
-```
-Si progress_percent == 100% → certified = true
-Si progress_percent < 100% → certified = false
-```
-
-**Ejemplo**:
-- Docente con `Clases completas = "47/47"` → `progress_percent = 100%` → `certified = true`
-- Docente con `Clases completas = "35/47"` → `progress_percent = 74.47%` → `certified = false`
+- **Un mismo docente puede aparecer en varias filas** (una por certificación/PLD que está cursando).
+- El backend **agrupa por nombre** (persona) y, para cada docente, lista **todas las certificaciones (PLD)** en las que figura.
+- El progreso de cada PLD se calcula desde la columna `Clases completas` usando `parse_fraction()` (formato `"X/Y"`).
+- Por cada PLD: `progress_percent == 100%` → `certified = true` en esa certificación.
 
 #### Summary docentes
 
-- `total_teachers`
-- `certified_teachers`
-- `certification_rate_percent`
+- `total_teachers`: cantidad de **docentes únicos** (personas).
+- `certified_teachers`: cantidad de docentes que tienen **al menos una** certificación al 100%.
+- `certification_rate_percent`: `certified_teachers / total_teachers * 100`.
 
 #### Listado de docentes
 
-Cada docente incluye:
+Cada docente incluye su nombre y la lista de PLD en los que figura:
 
 ```json
 {
   "name": "Nombre Apellido",
-  "progress_percent": 75.0,
-  "certified": false
+  "plds": [
+    { "certification_name": "PLD Matemáticas", "progress_percent": 100.0, "certified": true },
+    { "certification_name": "PLD Lengua", "progress_percent": 75.0, "certified": false }
+  ]
 }
 ```
-
-❌ No se incluye `route_name` porque no aporta valor analítico
 
 ---
 
@@ -258,13 +257,16 @@ JSON estructurado con la siguiente arquitectura:
     "teachers": [
       {
         "name": "María González",
-        "progress_percent": 100.0,
-        "certified": true
+        "plds": [
+          { "certification_name": "PLD Matemáticas", "progress_percent": 100.0, "certified": true },
+          { "certification_name": "PLD Lengua", "progress_percent": 75.0, "certified": false }
+        ]
       },
       {
         "name": "Juan Pérez",
-        "progress_percent": 75.0,
-        "certified": false
+        "plds": [
+          { "certification_name": "PLD Ciencias", "progress_percent": 75.0, "certified": false }
+        ]
       }
     ]
   },
@@ -283,9 +285,90 @@ JSON estructurado con la siguiente arquitectura:
 - **`students.groups`**: Array con un objeto por cada ruta de alumnos, incluyendo:
   - Nombre de la ruta y cantidad de estudiantes
   - Métricas específicas de esa ruta (incluyendo `classes_completion_percent`)
-- **`teachers_pld.summary`**: Resumen de docentes (totales y certificados)
-- **`teachers_pld.teachers`**: Lista individual de cada docente con su progreso y estado de certificación
+- **`teachers_pld.summary`**: Resumen de docentes (totales únicos y cuántos tienen al menos una certificación al 100%)
+- **`teachers_pld.teachers`**: Lista de docentes; cada uno tiene `name` y `plds` (array de certificaciones con `certification_name`, `progress_percent`, `certified`)
 - **`metadata`**: Información sobre cuándo se generó el reporte y parámetros usados
+
+---
+
+## 📱 Guía para el front: consumir la nueva estructura de docentes (PLD)
+
+Esta sección explica en detalle el cambio en `teachers_pld` para que el front pueda mostrar correctamente a los docentes y sus certificaciones.
+
+### ¿Qué cambió y por qué?
+
+**Antes** (reporte antiguo): cada docente aparecía como máximo una vez. La respuesta traía un objeto por docente con un único progreso y un único estado de certificación:
+
+```json
+{
+  "name": "María González",
+  "progress_percent": 100.0,
+  "certified": true
+}
+```
+
+**Ahora** (reporte nuevo): un mismo docente puede estar cursando **varias certificaciones (PLD)** a la vez. Por eso la respuesta agrupa por persona y, dentro de cada docente, lista **todas** sus certificaciones con el progreso y el estado de cada una.
+
+La estructura actual es:
+
+```json
+{
+  "name": "María González",
+  "plds": [
+    { "certification_name": "PLD Matemáticas", "progress_percent": 100.0, "certified": true },
+    { "certification_name": "PLD Lengua", "progress_percent": 75.0, "certified": false }
+  ]
+}
+```
+
+- **`name`**: nombre del docente (persona). Es único en la lista `teachers`.
+- **`plds`**: array de certificaciones en las que figura ese docente. Cada elemento es una certificación distinta (PLD) con:
+  - **`certification_name`**: nombre de la certificación/ruta (ej. "PLD Matemáticas").
+  - **`progress_percent`**: progreso en esa certificación (0–100). Viene de la columna "Clases completas" (fracción X/Y convertida a %).
+  - **`certified`**: `true` si en esa certificación llegó al 100%; `false` si no.
+
+### Cómo consumirlo en el front
+
+1. **Listar docentes**: iterar sobre `response.teachers_pld.teachers`. Cada elemento es un docente (persona) con `name` y `plds`.
+2. **Por cada docente, listar sus certificaciones**: iterar sobre `teacher.plds`. Cada elemento es una certificación con `certification_name`, `progress_percent` y `certified`.
+3. **Dejar de usar** en cada docente:
+   - `progress_percent` (ya no existe a nivel docente).
+   - `certified` (ya no existe a nivel docente).
+4. **Usar en su lugar**:
+   - Para mostrar “progreso del docente”: puede ser el progreso de cada PLD en `teacher.plds[].progress_percent`, o un resumen (ej. “X de Y certificaciones al 100%”).
+   - Para “¿está certificado?”: depende del diseño. Opciones típicas:
+     - “Certificado” = tiene **al menos una** certificación al 100% → `teacher.plds.some(p => p.certified)`.
+     - Mostrar por certificación: “PLD Matemáticas: 100% ✓” y “PLD Lengua: 75%”.
+
+### Resumen (`teachers_pld.summary`)
+
+- **`total_teachers`**: cantidad de **personas** (docentes únicos). No es la cantidad de filas ni de certificaciones.
+- **`certified_teachers`**: cantidad de docentes que tienen **al menos una** certificación con `certified: true`.
+- **`certification_rate_percent`**: `(certified_teachers / total_teachers) * 100`. Porcentaje de docentes que tienen al menos un PLD al 100%.
+
+Ejemplo: 10 docentes, 7 con al menos una certificación al 100% → `total_teachers: 10`, `certified_teachers: 7`, `certification_rate_percent: 70.0`.
+
+### Ejemplo de uso en código (pseudocódigo)
+
+```javascript
+// Listar docentes y sus certificaciones
+response.teachers_pld.teachers.forEach(teacher => {
+  console.log(teacher.name);
+  teacher.plds.forEach(pld => {
+    console.log(`  - ${pld.certification_name}: ${pld.progress_percent}% ${pld.certified ? '✓' : ''}`);
+  });
+});
+
+// Saber si un docente tiene al menos una certificación al 100%
+const hasAnyCertified = teacher.plds.some(p => p.certified);
+
+// Contar cuántas certificaciones completó (al 100%)
+const certifiedCount = teacher.plds.filter(p => p.certified).length;
+```
+
+### Compatibilidad con el reporte antiguo
+
+Si el backend recibe un **reporte en formato antiguo**, cada docente sigue teniendo una sola fila, así que cada uno tendrá **un solo elemento** en `plds`. La estructura es la misma: `name` + `plds` (array de uno o más elementos). El front puede asumir siempre que existe `teachers[].plds` y recorrerlo; no hace falta una rama especial para “formato viejo”.
 
 ---
 
@@ -349,9 +432,10 @@ http://127.0.0.1:8000
 El proyecto incluye funciones helper para:
 
 - **`parse_percentage(value)`**: Convierte strings como `"75%"` a número `75.0`
-- **`parse_fraction(value)`**: Convierte fracciones como `"30/47"` o `"47.0/47"` a porcentaje `(30/47)*100 = 63.83`
+- **`parse_fraction(value)`**: Convierte fracciones como `"30/47"` o `"44/47"` a porcentaje `(X/Y)*100`
 - **`days_since(date_str)`**: Calcula días transcurridos desde una fecha hasta hoy
 - **`safe_round(value)`**: Redondea valores de forma segura, manejando NaN y None
+- **`school_id_from_filename(filename)`**: Extrae el nombre del colegio desde el nombre del archivo (sin extensión, sin espacios al inicio/final)
 
 **Uso en el código**:
 - `Cursos completos` y `Clases completas` usan `parse_fraction()` porque vienen en formato `"X/Y"`
