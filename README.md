@@ -407,11 +407,13 @@ pip install -r requirements.txt
 
 ### 4️⃣ Levantar el servidor
 
+Ejecutar el módulo `app.main` (que internamente levanta `uvicorn`):
+
 ```bash
-uvicorn app.main:app --reload
+python -m app.main
 ```
 
-Servidor disponible en:
+Por defecto, el servidor queda disponible en:
 
 ```
 http://127.0.0.1:8000

@@ -17,6 +17,12 @@ app.add_middleware(
 )
 
 
+@app.get("/health")
+async def health():
+    """Endpoint de health check para que Electron detecte cuando el backend está listo"""
+    return {"status": "ok"}
+
+
 @app.post("/analyze-report")
 async def analyze(file: UploadFile = File(...)):
     if not file.filename.endswith((".csv", ".xlsx")):
@@ -27,3 +33,9 @@ async def analyze(file: UploadFile = File(...)):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# Iniciar uvicorn cuando se ejecuta directamente (no cuando se importa)
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8000)
