@@ -50,13 +50,17 @@ def analyze_report(file):
     # --------------------------------------------------
     # Normalizar columnas y obtener school_id (soporta reporte original y nuevo)
     # --------------------------------------------------
-    df, school_id = _normalize_columns_and_school(df, file.filename or "")
+    try:
+        df, school_id = _normalize_columns_and_school(df, file.filename or "")
+    except Exception as e:
+        raise ValueError(f"Error al procesar la estructura del archivo: {str(e)}")
 
     # --------------------------------------------------
     # Filtrar filas inválidas (ruta vacía, "Filtros aplicados")
     # --------------------------------------------------
     if "Ruta" not in df.columns:
-        raise ValueError("El archivo no contiene la columna de ruta/certificación esperada.")
+        raise ValueError("El archivo no tiene el formato esperado. No se encontró la columna 'Ruta' (o 'Certificación'). Asegúrate de estar subiendo el reporte correcto.")
+    
     df["Ruta"] = df["Ruta"].fillna("").astype(str)
     df = df[df["Ruta"].notna()]
     df = df[df["Ruta"].str.strip() != ""]
