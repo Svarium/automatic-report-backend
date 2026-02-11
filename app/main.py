@@ -1,3 +1,13 @@
+import sys
+import os
+from pathlib import Path
+
+# Fix para empaquetado: Asegurar que el directorio raíz esté en el path
+# Esto permite que 'from app.xxx' funcione en cualquier entorno empaquetado
+root_dir = str(Path(__file__).resolve().parent.parent)
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
+
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from app.analyzer import analyze_report
