@@ -78,42 +78,50 @@ def analyze_report(file):
     # ==================================================
     # ALUMNOS
     # ==================================================
-    total_students = len(df_students)
-    
-# 👉 contar SOLO rutas de alumnos válidas
-    df_students_valid_routes = df_students[df_students["Ruta"].str.strip() != ""]
+    if df_students.empty:
+        # Caso especial: el reporte tiene solo PLD (docentes) y ningún alumno
+        total_students = 0
+        total_groups = 0
+        students_summary = {
+            "digital_vitality_30d_avg": 0.0,
+            "recent_progress_15d_avg": 0.0,
+        }
+        groups = []
+    else:
+        total_students = len(df_students)
 
-    total_groups = df_students_valid_routes["Ruta"].nunique()
+        # 👉 contar SOLO rutas de alumnos válidas
+        df_students_valid_routes = df_students[df_students["Ruta"].str.strip() != ""]
+        total_groups = df_students_valid_routes["Ruta"].nunique()
 
-    # Preparar columnas
-    df_students["courses_percent"] = df_students["Cursos completos"].apply(parse_fraction)
-    df_students["classes_percent"] = df_students["Clases completas"].apply(parse_fraction)
+        # Preparar columnas
+        df_students["courses_percent"] = df_students["Cursos completos"].apply(parse_fraction)
+        df_students["classes_percent"] = df_students["Clases completas"].apply(parse_fraction)
 
-    df_students["last_login_days"] = df_students["Último inicio de sesión (UTC-3)"].apply(days_since)
-    df_students["last_progress_days"] = df_students["Último progreso (UTC-3)"].apply(days_since)
+        df_students["last_login_days"] = df_students["Último inicio de sesión (UTC-3)"].apply(days_since)
+        df_students["last_progress_days"] = df_students["Último progreso (UTC-3)"].apply(days_since)
 
-    df_students["active_30d"] = df_students["last_login_days"] <= VITALITY_DAYS
-    df_students["progress_15d"] = df_students["last_progress_days"] <= RECENT_PROGRESS_DAYS
+        df_students["active_30d"] = df_students["last_login_days"] <= VITALITY_DAYS
+        df_students["progress_15d"] = df_students["last_progress_days"] <= RECENT_PROGRESS_DAYS
 
-    students_summary = {
-        "digital_vitality_30d_avg": safe_round(df_students["active_30d"].mean() * 100),
-        "recent_progress_15d_avg": safe_round(df_students["progress_15d"].mean() * 100),
-    }
+        students_summary = {
+            "digital_vitality_30d_avg": safe_round(df_students["active_30d"].mean() * 100),
+            "recent_progress_15d_avg": safe_round(df_students["progress_15d"].mean() * 100),
+        }
 
-    groups = []
-
-    for route, gdf in df_students.groupby("Ruta"):
-        groups.append({
-            "route_name": route,
-            "route_type": "students",
-            "students_count": len(gdf),
-            "metrics": {
-                "classes_completion_percent": safe_round(gdf["classes_percent"].mean()),
-                "digital_vitality_30d_percent": safe_round(gdf["active_30d"].mean() * 100),
-                "courses_completion_percent": safe_round(gdf["courses_percent"].mean()),
-                "recent_progress_15d_percent": safe_round(gdf["progress_15d"].mean() * 100),
-            }
-        })
+        groups = []
+        for route, gdf in df_students.groupby("Ruta"):
+            groups.append({
+                "route_name": route,
+                "route_type": "students",
+                "students_count": len(gdf),
+                "metrics": {
+                    "classes_completion_percent": safe_round(gdf["classes_percent"].mean()),
+                    "digital_vitality_30d_percent": safe_round(gdf["active_30d"].mean() * 100),
+                    "courses_completion_percent": safe_round(gdf["courses_percent"].mean()),
+                    "recent_progress_15d_percent": safe_round(gdf["progress_15d"].mean() * 100),
+                }
+            })
 
     # ==================================================
     # DOCENTES (PLD) — un docente puede tener varias certificaciones (varias filas)
