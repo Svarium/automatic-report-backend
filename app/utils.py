@@ -45,6 +45,21 @@ def parse_fraction(value):
         return 0.0
 
 
+def parse_completed_classes(value):
+    """
+    '20/40' -> 20.0
+    Devuelve solo el número de clases completadas (X en 'X/Y').
+    """
+    try:
+        if value is None or value == "":
+            return 0.0
+        completed, _ = value.split("/")
+        completed = float(completed)
+        return completed
+    except:
+        return 0.0
+
+
 def days_since(value):
     """
     Fecha -> días desde hoy

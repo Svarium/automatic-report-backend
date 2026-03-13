@@ -149,23 +149,22 @@ Cada grupo de estudiantes tiene las siguientes métricas:
 
 | Métrica | Descripción | Fuente de datos |
 |---------|-------------|-----------------|
-| `classes_completion_percent` | **Promedio porcentual de clases completadas** de todos los alumnos de esa ruta | Columna `Clases completas` (formato `"X/Y"` → `(X/Y)*100`) |
+| `classes_completion_percent` | **Cantidad promedio de clases completadas por alumno** en esa ruta (aprox. hasta qué clase llegó el grupo) | Columna `Clases completas` (formato `"X/Y"`, se toma solo `X`) |
 | `courses_completion_percent` | Promedio porcentual de cursos completados de todos los alumnos de esa ruta | Columna `Cursos completos` (formato `"X/Y"` → `(X/Y)*100`) |
 | `digital_vitality_30d_percent` | % de alumnos que iniciaron sesión en los últimos 30 días | Columna `Último inicio de sesión (UTC-3)` |
 | `recent_progress_15d_percent` | % de alumnos con progreso registrado en los últimos 15 días | Columna `Último progreso (UTC-3)` |
 
 **Nota importante**: `classes_completion_percent` se calcula así:
-1. Para cada alumno de la ruta, se toma el valor de `Clases completas` (ej: `"15/20"`)
-2. Se parsea la fracción usando `parse_fraction()` → `(15/20) * 100 = 75%`
-3. Se promedian todos los porcentajes de los alumnos de esa ruta
-4. El resultado se redondea con `safe_round()` y se envía como `classes_completion_percent`
+1. Para cada alumno de la ruta, se toma el valor de `Clases completas` (ej: `"2/31"`) y se extrae solo el numerador `X` → `2`.
+2. Se promedian esos valores `X` entre todos los alumnos del grupo.
+3. El resultado se redondea con `safe_round()` a un decimal y se envía como `classes_completion_percent`.
 
 **Ejemplo práctico**:
 - Ruta "Matemáticas" tiene 3 alumnos:
-  - Alumno 1: `"18/20"` → 90%
-  - Alumno 2: `"15/20"` → 75%
-  - Alumno 3: `"20/20"` → 100%
-- `classes_completion_percent` = `(90 + 75 + 100) / 3 = 88.33%`
+  - Alumno 1: `"2/31"` → 2 clases completadas
+  - Alumno 2: `"0/31"` → 0 clases completadas
+  - Alumno 3: `"1/31"` → 1 clase completada
+- `classes_completion_percent` = `(2 + 0 + 1) / 3 = 1.0` → el grupo está, en promedio, alrededor de la clase 1
 
 ### 👩‍🏫 Métricas de docentes (PLD)
 
@@ -465,7 +464,7 @@ Este backend está preparado para:
 - ✔ Separación correcta alumnos / docentes
 - ✔ PLD interpretado correctamente
 - ✔ Métricas consistentes y bien calculadas
-- ✔ `classes_completion_percent` basado en columna `Clases completas` (formato fracción)
+- ✔ `classes_completion_percent` basado en la cantidad promedio de clases completadas (X en `Clases completas = "X/Y"`)
 - ✔ `courses_completion_percent` basado en columna `Cursos completos` (formato fracción)
 - ✔ Cálculo de vitalidad digital y progreso reciente funcionando
 - ✔ Certificación docente basada en progreso 100%
