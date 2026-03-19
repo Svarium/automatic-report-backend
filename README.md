@@ -149,22 +149,28 @@ Cada grupo de estudiantes tiene las siguientes métricas:
 
 | Métrica | Descripción | Fuente de datos |
 |---------|-------------|-----------------|
-| `classes_completion_percent` | **Cantidad promedio de clases completadas por alumno** en esa ruta (aprox. hasta qué clase llegó el grupo) | Columna `Clases completas` (formato `"X/Y"`, se toma solo `X`) |
-| `courses_completion_percent` | Promedio porcentual de cursos completados de todos los alumnos de esa ruta | Columna `Cursos completos` (formato `"X/Y"` → `(X/Y)*100`) |
+| `classes_completion_percent` | String con plantilla "{valor} de {clases_totales} clases totales". El valor es el promedio de clases completadas por alumno (se toma solo `X` de `"X/Y"`). | Denominador `Y` de `Clases completas` (más el valor actual que ya calculaba el backend) |
+| `courses_completion_percent` | String con plantilla "{valor} de {cursos_totales} cursos totales". El valor es el cálculo actual del backend para cursos. | Denominador `Y` de `Cursos completos` (más el valor actual que ya calculaba el backend) |
 | `digital_vitality_30d_percent` | % de alumnos que iniciaron sesión en los últimos 30 días | Columna `Último inicio de sesión (UTC-3)` |
 | `recent_progress_15d_percent` | % de alumnos con progreso registrado en los últimos 15 días | Columna `Último progreso (UTC-3)` |
 
-**Nota importante**: `classes_completion_percent` se calcula así:
-1. Para cada alumno de la ruta, se toma el valor de `Clases completas` (ej: `"2/31"`) y se extrae solo el numerador `X` → `2`.
-2. Se promedian esos valores `X` entre todos los alumnos del grupo.
-3. El resultado se redondea con `safe_round()` a un decimal y se envía como `classes_completion_percent`.
+**Nota importante (front)**: `classes_completion_percent` y `courses_completion_percent` ya **no** son porcentajes numéricos.
+Ahora vienen como **string con texto** usando la plantilla:
+- `"{valor} de {total} clases totales"`
+- `"{valor} de {total} cursos totales"`
+
+Para `classes_completion_percent`:
+1. Para cada alumno de la ruta, se toma `Clases completas` (ej: `"2/31"`) y se extrae solo `X` → `2`.
+2. Se promedian esos `X` entre todos los alumnos del grupo y se redondea a **1 decimal** (esto es `{valor}`).
+3. El `{total}` (denominador) se toma del `Y` de `Clases completas` (ej: `31` en `"2/31"`) y se muestra como entero.
 
 **Ejemplo práctico**:
 - Ruta "Matemáticas" tiene 3 alumnos:
   - Alumno 1: `"2/31"` → 2 clases completadas
   - Alumno 2: `"0/31"` → 0 clases completadas
   - Alumno 3: `"1/31"` → 1 clase completada
-- `classes_completion_percent` = `(2 + 0 + 1) / 3 = 1.0` → el grupo está, en promedio, alrededor de la clase 1
+- `{valor}` = `(2 + 0 + 1) / 3 = 1.0`
+- `classes_completion_percent` = `"1.0 de 31 clases totales"`
 
 ### 👩‍🏫 Métricas de docentes (PLD)
 
@@ -228,8 +234,8 @@ JSON estructurado con la siguiente arquitectura:
         "route_type": "students",
         "students_count": 25,
         "metrics": {
-          "classes_completion_percent": 85.3,
-          "courses_completion_percent": 72.1,
+          "classes_completion_percent": "26.9 de 46 clases totales",
+          "courses_completion_percent": "71.0 de 36 cursos totales",
           "digital_vitality_30d_percent": 80.0,
           "recent_progress_15d_percent": 65.0
         }
@@ -239,8 +245,8 @@ JSON estructurado con la siguiente arquitectura:
         "route_type": "students",
         "students_count": 30,
         "metrics": {
-          "classes_completion_percent": 90.5,
-          "courses_completion_percent": 78.3,
+          "classes_completion_percent": "29.7 de 46 clases totales",
+          "courses_completion_percent": "78.3 de 40 cursos totales",
           "digital_vitality_30d_percent": 85.0,
           "recent_progress_15d_percent": 70.0
         }
@@ -284,6 +290,7 @@ JSON estructurado con la siguiente arquitectura:
 - **`students.groups`**: Array con un objeto por cada ruta de alumnos, incluyendo:
   - Nombre de la ruta y cantidad de estudiantes
   - Métricas específicas de esa ruta (incluyendo `classes_completion_percent`)
+- **Importante**: `classes_completion_percent` y `courses_completion_percent` vienen como **string de texto** (ej: `"26.9 de 46 clases totales"`), para que el front lo muestre directo sin recomputar denominadores.
 - **`teachers_pld.summary`**: Resumen de docentes (totales únicos y cuántos tienen al menos una certificación al 100%)
 - **`teachers_pld.teachers`**: Lista de docentes; cada uno tiene `name` y `plds` (array de certificaciones con `certification_name`, `progress_percent`, `certified`)
 - **`metadata`**: Información sobre cuándo se generó el reporte y parámetros usados

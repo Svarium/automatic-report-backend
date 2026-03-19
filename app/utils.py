@@ -60,6 +60,21 @@ def parse_completed_classes(value):
         return 0.0
 
 
+def parse_total_fraction(value):
+    """
+    '20/40' -> 40 (solo el denominador Y).
+    """
+    try:
+        if value is None or value == "":
+            return 0
+        _, total = value.split("/")
+        total = float(total)
+        # Si viene como 47.0 lo mostramos como entero 47
+        return int(total) if total.is_integer() else int(total)
+    except:
+        return 0
+
+
 def days_since(value):
     """
     Fecha -> días desde hoy

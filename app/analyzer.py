@@ -4,6 +4,7 @@ from app.utils import (
     parse_percentage,
     parse_fraction,
     parse_completed_classes,
+    parse_total_fraction,
     days_since,
     safe_round,
     school_id_from_filename,
@@ -99,6 +100,9 @@ def analyze_report(file):
         df_students["courses_percent"] = df_students["Cursos completos"].apply(parse_fraction)
         df_students["classes_percent"] = df_students["Clases completas"].apply(parse_fraction)
         df_students["classes_completed"] = df_students["Clases completas"].apply(parse_completed_classes)
+        # Totales fijos por certificación/ruta (Y en 'X/Y')
+        df_students["classes_total"] = df_students["Clases completas"].apply(parse_total_fraction)
+        df_students["courses_total"] = df_students["Cursos completos"].apply(parse_total_fraction)
 
         df_students["last_login_days"] = df_students["Último inicio de sesión (UTC-3)"].apply(days_since)
         df_students["last_progress_days"] = df_students["Último progreso (UTC-3)"].apply(days_since)
@@ -113,15 +117,21 @@ def analyze_report(file):
 
         groups = []
         for route, gdf in df_students.groupby("Ruta"):
+            # Se asume (según tu regla) que el denominador es consistente dentro del grupo
+            classes_total = int(gdf["classes_total"].iloc[0]) if not gdf["classes_total"].empty else 0
+            courses_total = int(gdf["courses_total"].iloc[0]) if not gdf["courses_total"].empty else 0
+
+            classes_val = safe_round(gdf["classes_completed"].mean())
+            courses_val = safe_round(gdf["courses_percent"].mean())
             groups.append({
                 "route_name": route,
                 "route_type": "students",
                 "students_count": len(gdf),
                 "metrics": {
-                    # Ahora representa la cantidad promedio de clases completadas por alumno (X en 'X/Y')
-                    "classes_completion_percent": safe_round(gdf["classes_completed"].mean()),
+                    # Plantilla requerida por el front: "{valor} de {total} <clases/cursos> totales"
+                    "classes_completion_percent": f"{classes_val} de {classes_total} clases totales",
                     "digital_vitality_30d_percent": safe_round(gdf["active_30d"].mean() * 100),
-                    "courses_completion_percent": safe_round(gdf["courses_percent"].mean()),
+                    "courses_completion_percent": f"{courses_val} de {courses_total} cursos totales",
                     "recent_progress_15d_percent": safe_round(gdf["progress_15d"].mean() * 100),
                 }
             })
