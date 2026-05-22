@@ -75,6 +75,24 @@ def parse_total_fraction(value):
         return 0
 
 
+def is_fraction_xy_complete(value):
+    """
+    True si en 'X/Y' el progreso está completo: X == Y (ej. 4/4, 2/2) y Y > 0.
+    No cuenta avance parcial (ej. 2/4).
+    """
+    try:
+        if value is None or value == "":
+            return False
+        left, right = value.split("/")
+        x = float(left)
+        y = float(right)
+        if y <= 0:
+            return False
+        return abs(x - y) < 1e-9
+    except:
+        return False
+
+
 def days_since(value):
     """
     Fecha -> días desde hoy

@@ -5,19 +5,23 @@ from app.utils import (
     parse_fraction,
     parse_completed_classes,
     parse_total_fraction,
+    is_fraction_xy_complete,
     days_since,
     safe_round,
     school_id_from_filename,
 )
 
 VITALITY_DAYS = 30
+VITALITY_DAYS_15 = 15
 RECENT_PROGRESS_DAYS = 15
+RECENT_PROGRESS_DAYS_30 = 30
 
 
 # Mapeo reporte nuevo → nombres canónicos (mismos que reporte original)
 NEW_REPORT_COLUMN_MAP = {
     "Usuario": "Estudiante",
     "Certificación": "Ruta",
+    "Progreso de cursos obligatorios": "Cursos obligatorios completos",
     "Progreso en cursos": "Cursos completos",
     "Último login": "Último inicio de sesión (UTC-3)",
     "Último progreso": "Último progreso (UTC-3)",
@@ -87,6 +91,7 @@ def analyze_report(file):
         students_summary = {
             "digital_vitality_30d_avg": 0.0,
             "recent_progress_15d_avg": 0.0,
+            "mandatory_courses_full_completion_percent": None,
         }
         groups = []
     else:
@@ -104,16 +109,36 @@ def analyze_report(file):
         df_students["classes_total"] = df_students["Clases completas"].apply(parse_total_fraction)
         df_students["courses_total"] = df_students["Cursos completos"].apply(parse_total_fraction)
 
+        has_mandatory_courses = "Cursos obligatorios completos" in df_students.columns
+        if has_mandatory_courses:
+            df_students["mandatory_courses_percent"] = df_students["Cursos obligatorios completos"].apply(
+                parse_fraction
+            )
+            df_students["mandatory_courses_total"] = df_students["Cursos obligatorios completos"].apply(
+                parse_total_fraction
+            )
+            df_students["mandatory_all_done"] = df_students["Cursos obligatorios completos"].apply(
+                is_fraction_xy_complete
+            )
+
         df_students["last_login_days"] = df_students["Último inicio de sesión (UTC-3)"].apply(days_since)
         df_students["last_progress_days"] = df_students["Último progreso (UTC-3)"].apply(days_since)
 
         df_students["active_30d"] = df_students["last_login_days"] <= VITALITY_DAYS
+        df_students["active_15d"] = df_students["last_login_days"] <= VITALITY_DAYS_15
         df_students["progress_15d"] = df_students["last_progress_days"] <= RECENT_PROGRESS_DAYS
+        df_students["progress_30d"] = df_students["last_progress_days"] <= RECENT_PROGRESS_DAYS_30
 
         students_summary = {
             "digital_vitality_30d_avg": safe_round(df_students["active_30d"].mean() * 100),
             "recent_progress_15d_avg": safe_round(df_students["progress_15d"].mean() * 100),
         }
+        if has_mandatory_courses:
+            students_summary["mandatory_courses_full_completion_percent"] = safe_round(
+                df_students["mandatory_all_done"].mean() * 100
+            )
+        else:
+            students_summary["mandatory_courses_full_completion_percent"] = None
 
         groups = []
         for route, gdf in df_students.groupby("Ruta"):
@@ -123,17 +148,31 @@ def analyze_report(file):
 
             classes_val = safe_round(gdf["classes_completed"].mean())
             courses_val = safe_round(gdf["courses_percent"].mean())
+            metrics = {
+                # Plantilla requerida por el front: "{valor} de {total} <clases/cursos> totales"
+                "classes_completion_percent": f"{classes_val} de {classes_total} clases totales",
+                "digital_vitality_30d_percent": safe_round(gdf["active_30d"].mean() * 100),
+                "digital_vitality_15d_percent": safe_round(gdf["active_15d"].mean() * 100),
+                "courses_completion_percent": f"{courses_val} de {courses_total} cursos totales",
+                "recent_progress_15d_percent": safe_round(gdf["progress_15d"].mean() * 100),
+                "recent_progress_30d_percent": safe_round(gdf["progress_30d"].mean() * 100),
+            }
+            if has_mandatory_courses:
+                mandatory_total = (
+                    int(gdf["mandatory_courses_total"].iloc[0]) if not gdf["mandatory_courses_total"].empty else 0
+                )
+                mandatory_val = safe_round(gdf["mandatory_courses_percent"].mean())
+                metrics["mandatory_courses_completion_percent"] = (
+                    f"{mandatory_val} de {mandatory_total} cursos obligatorios totales"
+                )
+            else:
+                metrics["mandatory_courses_completion_percent"] = None
+
             groups.append({
                 "route_name": route,
                 "route_type": "students",
                 "students_count": len(gdf),
-                "metrics": {
-                    # Plantilla requerida por el front: "{valor} de {total} <clases/cursos> totales"
-                    "classes_completion_percent": f"{classes_val} de {classes_total} clases totales",
-                    "digital_vitality_30d_percent": safe_round(gdf["active_30d"].mean() * 100),
-                    "courses_completion_percent": f"{courses_val} de {courses_total} cursos totales",
-                    "recent_progress_15d_percent": safe_round(gdf["progress_15d"].mean() * 100),
-                }
+                "metrics": metrics,
             })
 
     # ==================================================

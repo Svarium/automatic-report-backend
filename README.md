@@ -88,13 +88,14 @@ El backend acepta **dos formatos de reporte**. Se detecta automáticamente por l
 |----------------------|-----------------------------|
 | **Usuario** (A) | Estudiante (nombre) |
 | **Certificación** (C) | Ruta (si contiene "PLD" → docente) |
-| **Progreso en cursos** (D) | Cursos completos (fracción, ej: `44/47`) |
-| **Clases completas** (E) | Clases completas (fracción, ej: `44/47`) |
-| **Último progreso** (F) | Último progreso (UTC-3) |
-| **Último login** (G) | Último inicio de sesión (UTC-3) |
+| **Progreso de cursos obligatorios** (D) | Cursos obligatorios completos (fracción `X/Y`, mismo análisis que cursos) |
+| **Progreso en cursos** (E) | Cursos completos (fracción, ej: `2/6`) |
+| **Clases completas** (F) | Clases completas (fracción, ej: `7/43`) |
+| **Último progreso** (G) | Último progreso (UTC-3) |
+| **Último login** (H) | Último inicio de sesión (UTC-3) |
 
 - **Nombre del colegio (`school.id`)**: En el formato nuevo no hay columna "Escuela". El nombre del colegio se toma del **nombre del archivo** subido (sin extensión, espacios al inicio/final eliminados). Se recomienda que los mentores guarden el reporte con el nombre correcto del colegio.
-- Columnas ignoradas en el formato nuevo: Email (B), Fecha de inscripción (H), track_id (I), user_id (J).
+- Columnas ignoradas en el formato nuevo: **Email**, **Fecha de inscripción**, **track_id**, **user_id** (no se usan en el análisis).
 
 ### Tolerancia del sistema:
 - ✅ Celdas vacías
@@ -151,13 +152,18 @@ Cada grupo de estudiantes tiene las siguientes métricas:
 |---------|-------------|-----------------|
 | `classes_completion_percent` | String con plantilla "{valor} de {clases_totales} clases totales". El valor es el promedio de clases completadas por alumno (se toma solo `X` de `"X/Y"`). | Denominador `Y` de `Clases completas` (más el valor actual que ya calculaba el backend) |
 | `courses_completion_percent` | String con plantilla "{valor} de {cursos_totales} cursos totales". El valor es el cálculo actual del backend para cursos. | Denominador `Y` de `Cursos completos` (más el valor actual que ya calculaba el backend) |
-| `digital_vitality_30d_percent` | % de alumnos que iniciaron sesión en los últimos 30 días | Columna `Último inicio de sesión (UTC-3)` |
-| `recent_progress_15d_percent` | % de alumnos con progreso registrado en los últimos 15 días | Columna `Último progreso (UTC-3)` |
+| `mandatory_courses_completion_percent` | String con plantilla "{valor} de {total} cursos obligatorios totales" (misma lógica que `courses_completion_percent`, sobre obligatorios). Si no hay columna, `null`. | Columna `Progreso de cursos obligatorios` (`X/Y`) |
+| `digital_vitality_30d_percent` | % de alumnos del grupo con login en los últimos **30** días | Columna `Último inicio de sesión (UTC-3)` |
+| `digital_vitality_15d_percent` | Igual que vitalidad digital, ventana de **15** días (campo adicional para el front) | Misma columna de login |
+| `recent_progress_15d_percent` | % de alumnos del grupo con progreso en los últimos **15** días | Columna `Último progreso (UTC-3)` |
+| `recent_progress_30d_percent` | Igual que progreso reciente, ventana de **30** días (campo adicional para el front) | Misma columna de progreso |
 
-**Nota importante (front)**: `classes_completion_percent` y `courses_completion_percent` ya **no** son porcentajes numéricos.
+**Nota importante (front)**: `classes_completion_percent` y `courses_completion_percent` vienen como **string con texto** (plantilla “X de Y … totales”).  
+`mandatory_courses_completion_percent` por grupo es un **string** (igual que cursos/clases). La **tasa de certificación** por obligatorios completos (`X` = `Y`) del colegio entero está solo en **`students.summary.mandatory_courses_full_completion_percent`** (número).
 Ahora vienen como **string con texto** usando la plantilla:
 - `"{valor} de {total} clases totales"`
 - `"{valor} de {total} cursos totales"`
+- `mandatory_courses_completion_percent`: string `"{valor} de {total} cursos obligatorios totales"`; si no aplica, `null`.
 
 Para `classes_completion_percent`:
 1. Para cada alumno de la ruta, se toma `Clases completas` (ej: `"2/31"`) y se extrae solo `X` → `2`.
@@ -226,7 +232,8 @@ JSON estructurado con la siguiente arquitectura:
   "students": {
     "summary": {
       "digital_vitality_30d_avg": 75.5,
-      "recent_progress_15d_avg": 60.2
+      "recent_progress_15d_avg": 60.2,
+      "mandatory_courses_full_completion_percent": 42.3
     },
     "groups": [
       {
@@ -236,8 +243,11 @@ JSON estructurado con la siguiente arquitectura:
         "metrics": {
           "classes_completion_percent": "26.9 de 46 clases totales",
           "courses_completion_percent": "71.0 de 36 cursos totales",
+          "mandatory_courses_completion_percent": "4.2 de 6 cursos obligatorios totales",
           "digital_vitality_30d_percent": 80.0,
-          "recent_progress_15d_percent": 65.0
+          "digital_vitality_15d_percent": 72.0,
+          "recent_progress_15d_percent": 65.0,
+          "recent_progress_30d_percent": 78.0
         }
       },
       {
@@ -247,8 +257,11 @@ JSON estructurado con la siguiente arquitectura:
         "metrics": {
           "classes_completion_percent": "29.7 de 46 clases totales",
           "courses_completion_percent": "78.3 de 40 cursos totales",
+          "mandatory_courses_completion_percent": "5.0 de 6 cursos obligatorios totales",
           "digital_vitality_30d_percent": 85.0,
-          "recent_progress_15d_percent": 70.0
+          "digital_vitality_15d_percent": 78.0,
+          "recent_progress_15d_percent": 70.0,
+          "recent_progress_30d_percent": 82.0
         }
       }
     ]
@@ -286,11 +299,11 @@ JSON estructurado con la siguiente arquitectura:
 ### Estructura de la respuesta explicada:
 
 - **`school`**: Información general del colegio y conteos totales
-- **`students.summary`**: Métricas agregadas de todos los alumnos (sin agrupar por ruta)
+- **`students.summary`**: Métricas agregadas de todos los alumnos (sin agrupar por ruta): vitalidad digital (30 d), progreso reciente (15 d) y, si el reporte trae cursos obligatorios, **`mandatory_courses_full_completion_percent`**: % de filas de alumnos del colegio con obligatorios **completos** (`X` = `Y` en `Progreso de cursos obligatorios`, con `Y > 0`). Si no hay columna, es `null`.
 - **`students.groups`**: Array con un objeto por cada ruta de alumnos, incluyendo:
   - Nombre de la ruta y cantidad de estudiantes
   - Métricas específicas de esa ruta (incluyendo `classes_completion_percent`)
-- **Importante**: `classes_completion_percent` y `courses_completion_percent` vienen como **string de texto** (ej: `"26.9 de 46 clases totales"`), para que el front lo muestre directo sin recomputar denominadores.
+- **Importante**: `classes_completion_percent`, `courses_completion_percent` y `mandatory_courses_completion_percent` vienen como **string de texto** (plantilla “X de Y … totales”). Si el archivo no incluye cursos obligatorios, `mandatory_courses_completion_percent` es `null`.
 - **`teachers_pld.summary`**: Resumen de docentes (totales únicos y cuántos tienen al menos una certificación al 100%)
 - **`teachers_pld.teachers`**: Lista de docentes; cada uno tiene `name` y `plds` (array de certificaciones con `certification_name`, `progress_percent`, `certified`)
 - **`metadata`**: Información sobre cuándo se generó el reporte y parámetros usados
@@ -441,6 +454,9 @@ El proyecto incluye funciones helper para:
 
 - **`parse_percentage(value)`**: Convierte strings como `"75%"` a número `75.0`
 - **`parse_fraction(value)`**: Convierte fracciones como `"30/47"` o `"44/47"` a porcentaje `(X/Y)*100`
+- **`parse_completed_classes(value)`**: Devuelve `X` de `"X/Y"`
+- **`parse_total_fraction(value)`**: Devuelve `Y` de `"X/Y"` (como entero)
+- **`is_fraction_xy_complete(value)`**: `True` si `"X/Y"` tiene `X == Y` y `Y > 0` (obligatorios completos, sin parcial)
 - **`days_since(date_str)`**: Calcula días transcurridos desde una fecha hasta hoy
 - **`safe_round(value)`**: Redondea valores de forma segura, manejando NaN y None
 - **`school_id_from_filename(filename)`**: Extrae el nombre del colegio desde el nombre del archivo (sin extensión, sin espacios al inicio/final)
@@ -473,6 +489,7 @@ Este backend está preparado para:
 - ✔ Métricas consistentes y bien calculadas
 - ✔ `classes_completion_percent` basado en la cantidad promedio de clases completadas (X en `Clases completas = "X/Y"`)
 - ✔ `courses_completion_percent` basado en columna `Cursos completos` (formato fracción)
+- ✔ `mandatory_courses_completion_percent` por grupo: string de avance en obligatorios (mismo formato que cursos)
 - ✔ Cálculo de vitalidad digital y progreso reciente funcionando
 - ✔ Certificación docente basada en progreso 100%
 - ✔ Listo para producción / dashboards
