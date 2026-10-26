@@ -1,3 +1,6 @@
+import re
+import os
+import json
 import pandas as pd
 from datetime import datetime
 from app.utils import (
@@ -15,6 +18,39 @@ VITALITY_DAYS = 30
 VITALITY_DAYS_15 = 15
 RECENT_PROGRESS_DAYS = 15
 RECENT_PROGRESS_DAYS_30 = 30
+
+# Fallback por defecto si no existe config.json
+DEFAULT_SINGLE_COURSE_CODES = [
+    "DATA", "DMST", "KOF3", "PYTH", "WEB3",
+    "ST1P", "ST2P", "ST3P", "ST1J", "ST2J", "ST3J",
+    "AVJS", "SENIOR TRACKS", "SENIOR TRACK", "KICK OFF 3", "WEB BASICS 3"
+]
+
+CONFIG_FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.json")
+
+
+def load_single_course_certifications() -> list:
+    """Carga la lista de certificaciones desde config.json dinámicamente."""
+    try:
+        if os.path.exists(CONFIG_FILE_PATH):
+            with open(CONFIG_FILE_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data.get("single_course_certifications", DEFAULT_SINGLE_COURSE_CODES)
+    except Exception:
+        pass
+    return DEFAULT_SINGLE_COURSE_CODES
+
+
+def is_single_course_certification(route_name: str) -> bool:
+    """Detecta si la ruta pertenece a una certificación donde 1 curso = certificado."""
+    if not route_name:
+        return False
+    codes = load_single_course_certifications()
+    route_upper = route_name.upper().strip()
+    return any(
+        re.search(rf"\b{re.escape(str(code).upper())}\b", route_upper)
+        for code in codes
+    )
 
 
 # Mapeo multilingüe (ES, EN, PT) a nombres canónicos internos
@@ -164,9 +200,16 @@ def analyze_report(file):
             df_students["mandatory_courses_total"] = df_students["Cursos obligatorios completos"].apply(
                 parse_total_fraction
             )
-            df_students["mandatory_all_done"] = df_students["Cursos obligatorios completos"].apply(
-                is_fraction_xy_complete
-            )
+            
+            def _check_mandatory_done(row):
+                val = row["Cursos obligatorios completos"]
+                route = row.get("Ruta", "")
+                if is_single_course_certification(route):
+                    # Si completó al menos 1 curso ya se considera certificado
+                    return parse_completed_classes(val) >= 1.0
+                return is_fraction_xy_complete(val)
+
+            df_students["mandatory_all_done"] = df_students.apply(_check_mandatory_done, axis=1)
 
         df_students["last_login_days"] = df_students["Último inicio de sesión (UTC-3)"].apply(days_since)
         df_students["last_progress_days"] = df_students["Último progreso (UTC-3)"].apply(days_since)
@@ -205,10 +248,20 @@ def analyze_report(file):
                 "recent_progress_30d_percent": safe_round(gdf["progress_30d"].mean() * 100),
             }
             if has_mandatory_courses:
-                mandatory_total = (
-                    int(gdf["mandatory_courses_total"].iloc[0]) if not gdf["mandatory_courses_total"].empty else 0
-                )
-                mandatory_val = safe_round(gdf["mandatory_courses_percent"].mean())
+                if is_single_course_certification(route):
+                    # Corrección de desfasaje para certificaciones especiales:
+                    # El requerimiento real es 1 curso
+                    mandatory_total = 1
+                    capped_completed = gdf["Cursos obligatorios completos"].apply(
+                        lambda v: 1.0 if parse_completed_classes(v) >= 1.0 else 0.0
+                    )
+                    mandatory_val = safe_round(capped_completed.mean())
+                else:
+                    mandatory_total = (
+                        int(gdf["mandatory_courses_total"].iloc[0]) if not gdf["mandatory_courses_total"].empty else 0
+                    )
+                    mandatory_val = safe_round(gdf["mandatory_courses_percent"].mean())
+
                 metrics["mandatory_courses_completion_percent"] = (
                     f"{mandatory_val} de {mandatory_total} cursos obligatorios totales"
                 )

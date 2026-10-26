@@ -40,6 +40,7 @@ backend/
 │   ├── utils.py         # Helpers de parsing y normalización
 │   └── __init__.py
 │
+├── config.json          # Configuración de códigos de certificaciones especiales (1 curso = certificado)
 ├── .venv/               # Entorno virtual (local)
 ├── requirements.txt
 └── README.md
@@ -84,18 +85,21 @@ El backend acepta **dos formatos de reporte**. Se detecta automáticamente por l
 
 ### Formato nuevo (reporte con certificaciones por fila)
 
-| Columna en el archivo | Equivale a (lógica interna) |
-|----------------------|-----------------------------|
-| **Usuario** (A) | Estudiante (nombre) |
-| **Certificación** (C) | Ruta (si contiene "PLD" → docente) |
-| **Progreso de cursos obligatorios** (D) | Cursos obligatorios completos (fracción `X/Y`, mismo análisis que cursos) |
-| **Progreso en cursos** (E) | Cursos completos (fracción, ej: `2/6`) |
-| **Clases completas** (F) | Clases completas (fracción, ej: `7/43`) |
-| **Último progreso** (G) | Último progreso (UTC-3) |
-| **Último login** (H) | Último inicio de sesión (UTC-3) |
+Soporta exportaciones automáticas en **Español, Inglés y Portugués**:
+
+| Columna en Español | Columna en Inglés | Columna en Portugués | Equivale a (lógica interna) |
+|---|---|---|---|
+| **Usuario** | `User` | `Usuário` | Estudiante (nombre) |
+| **Certificación** | `Certification` | `Formaçao` / `Formação` | Ruta (si contiene "PLD" → docente) |
+| **Progreso de cursos obligatorios** | `Required courses progress` | `Progresso dos cursos obrigatórios` | Cursos obligatorios completos (`X/Y`) |
+| **Progreso en cursos** | `Progress in courses` | `Progresso nos cursos` | Cursos completos (`X/Y`) |
+| **Clases completas** | `Completed lessons` | `Lições concluídas` | Clases completas (`X/Y`) |
+| **Último progreso** | `Latest Progress` | `Último progresso` | Último progreso (UTC-3) |
+| **Último login** | `Last login` | `Último login` | Último inicio de sesión (UTC-3) |
 
 - **Nombre del colegio (`school.id`)**: En el formato nuevo no hay columna "Escuela". El nombre del colegio se toma del **nombre del archivo** subido (sin extensión, espacios al inicio/final eliminados). Se recomienda que los mentores guarden el reporte con el nombre correcto del colegio.
-- Columnas ignoradas en el formato nuevo: **Email**, **Fecha de inscripción**, **track_id**, **user_id** (no se usan en el análisis).
+- **Columnas ignoradas**: `Email`, `Documento` (`Document`), `Número` (`Number`), `Fecha de inscripción` (`Enrollment date` / `Data de registro`), `track_id`, `user_id`.
+- **Validación defensiva**: Si al archivo le falta alguna de las columnas obligatorias para el cálculo, el backend responde con un mensaje de error detallado indicando los nombres esperados en cada idioma y las columnas detectadas.
 
 ### Tolerancia del sistema:
 - ✅ Celdas vacías
@@ -159,7 +163,7 @@ Cada grupo de estudiantes tiene las siguientes métricas:
 | `recent_progress_30d_percent` | Igual que progreso reciente, ventana de **30** días (campo adicional para el front) | Misma columna de progreso |
 
 **Nota importante (front)**: `classes_completion_percent` y `courses_completion_percent` vienen como **string con texto** (plantilla “X de Y … totales”).  
-`mandatory_courses_completion_percent` por grupo es un **string** (igual que cursos/clases). La **tasa de certificación** por obligatorios completos (`X` = `Y`) del colegio entero está solo en **`students.summary.mandatory_courses_full_completion_percent`** (número).
+`mandatory_courses_completion_percent` por grupo es un **string** (igual que cursos/clases). La **tasa de certificación** por obligatorios completos del colegio entero está en **`students.summary.mandatory_courses_full_completion_percent`** (número).
 Ahora vienen como **string con texto** usando la plantilla:
 - `"{valor} de {total} clases totales"`
 - `"{valor} de {total} cursos totales"`
@@ -170,13 +174,23 @@ Para `classes_completion_percent`:
 2. Se promedian esos `X` entre todos los alumnos del grupo y se redondea a **1 decimal** (esto es `{valor}`).
 3. El `{total}` (denominador) se toma del `Y` de `Clases completas` (ej: `31` en `"2/31"`) y se muestra como entero.
 
-**Ejemplo práctico**:
-- Ruta "Matemáticas" tiene 3 alumnos:
-  - Alumno 1: `"2/31"` → 2 clases completadas
-  - Alumno 2: `"0/31"` → 0 clases completadas
-  - Alumno 3: `"1/31"` → 1 clase completada
-- `{valor}` = `(2 + 0 + 1) / 3 = 1.0`
-- `classes_completion_percent` = `"1.0 de 31 clases totales"`
+#### 🎯 Regla especial: Certificaciones de 1 curso obligatorio (`config.json`)
+
+En ciertas certificaciones (ej. Senior Tracks, Kick Off 3, Web Basics 3, etc.), el reporte de Power BI puede exportar una fracción desfasada como `1/3` o `2/4`. Sin embargo, la regla pedagógica establece que **con completar al menos 1 curso obligatorio (`X >= 1`), el alumno ya se considera certificado**:
+
+- **Impacto en `mandatory_courses_full_completion_percent`**: Alumno con `X >= 1` suma como certificado al 100% para la tasa general.
+- **Impacto en `mandatory_courses_completion_percent`**: El denominador `{total}` se corrige a `1` (ej. `"1.0 de 1 cursos obligatorios totales"`).
+- **Configuración dinámica sin tocar código**: La lista de códigos o nombres de certificaciones que aplican a esta regla se define en **`config.json`**:
+  ```json
+  {
+    "single_course_certifications": [
+      "DATA", "DMST", "KOF3", "PYTH", "WEB3",
+      "ST1P", "ST2P", "ST3P", "ST1J", "ST2J", "ST3J",
+      "AVJS", "SENIOR TRACKS", "SENIOR TRACK", "KICK OFF 3", "WEB BASICS 3"
+    ]
+  }
+  ```
+  *Podés agregar nuevos códigos o variaciones a `config.json` y el backend los toma en la siguiente consulta sin necesidad de reiniciar.*
 
 ### 👩‍🏫 Métricas de docentes (PLD)
 
