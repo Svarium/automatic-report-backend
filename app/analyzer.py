@@ -17,29 +17,67 @@ RECENT_PROGRESS_DAYS = 15
 RECENT_PROGRESS_DAYS_30 = 30
 
 
-# Mapeo reporte nuevo → nombres canónicos (mismos que reporte original)
-NEW_REPORT_COLUMN_MAP = {
+# Mapeo multilingüe (ES, EN, PT) a nombres canónicos internos
+MULTILINGUAL_COLUMN_MAP = {
+    # Usuario / Estudiante
     "Usuario": "Estudiante",
+    "User": "Estudiante",
+    "Usuário": "Estudiante",
+
+    # Certificación / Ruta
     "Certificación": "Ruta",
+    "Certification": "Ruta",
+    "Formaçao": "Ruta",
+
+    # Obligatorios
     "Progreso de cursos obligatorios": "Cursos obligatorios completos",
+    "Required courses progress": "Cursos obligatorios completos",
+    "Progresso dos cursos obrigatórios": "Cursos obligatorios completos",
+
+    # Progreso en cursos
     "Progreso en cursos": "Cursos completos",
-    "Último login": "Último inicio de sesión (UTC-3)",
+    "Progress in courses": "Cursos completos",
+    "Progresso nos cursos": "Cursos completos",
+
+    # Clases completas
+    "Clases completas": "Clases completas",
+    "Completed lessons": "Clases completas",
+    "Lições concluídas": "Clases completas",
+
+    # Último progreso
     "Último progreso": "Último progreso (UTC-3)",
+    "Latest Progress": "Último progreso (UTC-3)",
+    "Último progresso": "Último progreso (UTC-3)",
+
+    # Último login
+    "Último login": "Último inicio de sesión (UTC-3)",
+    "Last login": "Último inicio de sesión (UTC-3)",
 }
+
+# Columnas indispensables que el backend necesita para procesar
+REQUIRED_CANONICAL_COLUMNS = [
+    ("Estudiante", "Estudiante / Usuario / User / Usuário"),
+    ("Ruta", "Ruta / Certificación / Certification / Formaçao"),
+    ("Cursos completos", "Cursos completos / Progreso en cursos / Progress in courses / Progresso nos cursos"),
+    ("Clases completas", "Clases completas / Completed lessons / Lições concluídas"),
+    ("Último progreso (UTC-3)", "Último progreso / Latest Progress / Último progresso"),
+    ("Último inicio de sesión (UTC-3)", "Último login / Last login"),
+]
 
 
 def _normalize_columns_and_school(df, filename):
-    """Detecta formato (original vs nuevo), normaliza columnas y devuelve school_id."""
+    """Normaliza columnas en ES/EN/PT y determina school_id."""
     df.columns = [str(c).strip() for c in df.columns]
 
-    is_new_format = "Certificación" in df.columns and "Usuario" in df.columns
-
-    if is_new_format:
-        rename = {k: v for k, v in NEW_REPORT_COLUMN_MAP.items() if k in df.columns}
+    # Renombrar columnas multilingües al esquema canónico
+    rename = {k: v for k, v in MULTILINGUAL_COLUMN_MAP.items() if k in df.columns}
+    if rename:
         df = df.rename(columns=rename)
-        school_id = school_id_from_filename(filename)
+
+    if "Escuela" in df.columns and not df["Escuela"].empty:
+        school_id = df["Escuela"].iloc[0]
     else:
-        school_id = df["Escuela"].iloc[0] if "Escuela" in df.columns else school_id_from_filename(filename)
+        school_id = school_id_from_filename(filename)
 
     return df, school_id
 
@@ -62,11 +100,20 @@ def analyze_report(file):
         raise ValueError(f"Error al procesar la estructura del archivo: {str(e)}")
 
     # --------------------------------------------------
+    # Validación explícita de columnas requeridas
+    # --------------------------------------------------
+    missing_cols = [
+        label for col, label in REQUIRED_CANONICAL_COLUMNS if col not in df.columns
+    ]
+    if missing_cols:
+        cols_formatted = "\n- ".join(missing_cols)
+        raise ValueError(
+            f"El archivo no tiene el formato esperado. Faltan las siguientes columnas requeridas (o sus variantes en ES/EN/PT):\n- {cols_formatted}\n\nColumnas detectadas en el archivo: {list(df.columns)}"
+        )
+
+    # --------------------------------------------------
     # Filtrar filas inválidas (ruta vacía, "Filtros aplicados")
     # --------------------------------------------------
-    if "Ruta" not in df.columns:
-        raise ValueError("El archivo no tiene el formato esperado. No se encontró la columna 'Ruta' (o 'Certificación'). Asegúrate de estar subiendo el reporte correcto.")
-    
     df["Ruta"] = df["Ruta"].fillna("").astype(str)
     df = df[df["Ruta"].notna()]
     df = df[df["Ruta"].str.strip() != ""]
